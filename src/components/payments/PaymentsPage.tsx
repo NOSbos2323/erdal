@@ -383,24 +383,39 @@ const PaymentsPage = () => {
         let importedActivities = 0;
         const errors = [];
 
-        // Import members with enhanced error handling and verification
+        // Import members with enhanced batch processing for better performance
         const memberService = await import("@/services/memberService");
 
-        // Process members in smaller batches to avoid overwhelming the database
-        const BATCH_SIZE = 10;
+        // Smaller batch size for better performance with images
+        const BATCH_SIZE = 3; // Reduced from 10 to 3 for better performance with images
         const memberBatches = [];
         for (let i = 0; i < members.length; i += BATCH_SIZE) {
           memberBatches.push(members.slice(i, i + BATCH_SIZE));
         }
 
-        for (const batch of memberBatches) {
-          const batchPromises = [];
+        console.log(
+          `معالجة ${members.length} عضو في ${memberBatches.length} دفعة`,
+        );
 
+        for (
+          let batchIndex = 0;
+          batchIndex < memberBatches.length;
+          batchIndex++
+        ) {
+          const batch = memberBatches[batchIndex];
+
+          // Update progress toast
+          toast({
+            title: `جاري استيراد الأعضاء...`,
+            description: `الدفعة ${batchIndex + 1} من ${memberBatches.length} (${Math.min((batchIndex + 1) * BATCH_SIZE, members.length)} من ${members.length})`,
+          });
+
+          // Process each member in the batch sequentially to avoid overwhelming the system
           for (let i = 0; i < batch.length; i++) {
             try {
               const member = batch[i];
               if (!member || typeof member !== "object") {
-                errors.push(`عضو غير صحيح في المجموعة`);
+                errors.push(`عضو غير صحيح في الدفعة ${batchIndex + 1}`);
                 continue;
               }
 
@@ -409,7 +424,7 @@ const PaymentsPage = () => {
                 typeof member.name !== "string" ||
                 member.name.trim() === ""
               ) {
-                errors.push(`عضو بدون اسم`);
+                errors.push(`عضو بدون اسم في الدفعة ${batchIndex + 1}`);
                 continue;
               }
 
@@ -449,59 +464,78 @@ const PaymentsPage = () => {
                 note: member.note || "",
               };
 
-              // Add to batch promises with enhanced error handling
-              batchPromises.push(
-                memberService
-                  .addOrUpdateMemberWithId(cleanMember)
-                  .then(() => {
-                    importedMembers++;
-                    console.log(`تم استيراد العضو: ${cleanMember.name}`);
-                  })
-                  .catch((error) => {
-                    console.error(
-                      `خطأ في استيراد العضو ${cleanMember.name}:`,
-                      error,
-                    );
-                    errors.push(
-                      `خطأ في استيراد العضو ${cleanMember.name}: ${error.message || error}`,
-                    );
-                  }),
-              );
+              // Process member sequentially with enhanced error handling
+              try {
+                await memberService.addOrUpdateMemberWithId(cleanMember);
+                importedMembers++;
+                console.log(
+                  `تم استيراد العضو: ${cleanMember.name} (${importedMembers}/${members.length})`,
+                );
+
+                // Small delay between each member to prevent overwhelming the system
+                await new Promise((resolve) => setTimeout(resolve, 50));
+              } catch (error) {
+                console.error(
+                  `خطأ في استيراد العضو ${cleanMember.name}:`,
+                  error,
+                );
+                errors.push(
+                  `خطأ في استيراد العضو ${cleanMember.name}: ${error.message || error}`,
+                );
+              }
             } catch (error) {
               console.error(`خطأ في معالجة العضو:`, error);
               errors.push(`خطأ في معالجة العضو: ${error}`);
             }
           }
 
-          // Wait for current batch to complete before processing next batch
-          await Promise.allSettled(batchPromises);
+          // Longer delay between batches to allow system recovery
+          await new Promise((resolve) => setTimeout(resolve, 300));
 
-          // Small delay between batches to prevent overwhelming the database
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          // Force garbage collection if available
+          if (window.gc) {
+            window.gc();
+          }
         }
 
-        // Import payments with enhanced batch processing
+        // Import payments with enhanced sequential processing
         const paymentService = await import("@/services/paymentService");
 
         // Process payments in smaller batches
+        const PAYMENT_BATCH_SIZE = 5; // Slightly larger batch for payments as they're lighter
         const paymentBatches = [];
-        for (let i = 0; i < payments.length; i += BATCH_SIZE) {
-          paymentBatches.push(payments.slice(i, i + BATCH_SIZE));
+        for (let i = 0; i < payments.length; i += PAYMENT_BATCH_SIZE) {
+          paymentBatches.push(payments.slice(i, i + PAYMENT_BATCH_SIZE));
         }
 
-        for (const batch of paymentBatches) {
-          const batchPromises = [];
+        console.log(
+          `معالجة ${payments.length} دفعة في ${paymentBatches.length} دفعة`,
+        );
 
+        for (
+          let batchIndex = 0;
+          batchIndex < paymentBatches.length;
+          batchIndex++
+        ) {
+          const batch = paymentBatches[batchIndex];
+
+          // Update progress toast
+          toast({
+            title: `جاري استيراد الدفعات...`,
+            description: `الدفعة ${batchIndex + 1} من ${paymentBatches.length} (${Math.min((batchIndex + 1) * PAYMENT_BATCH_SIZE, payments.length)} من ${payments.length})`,
+          });
+
+          // Process each payment in the batch sequentially
           for (let i = 0; i < batch.length; i++) {
             try {
               const payment = batch[i];
               if (!payment || typeof payment !== "object") {
-                errors.push(`دفعة غير صحيحة في المجموعة`);
+                errors.push(`دفعة غير صحيحة في الدفعة ${batchIndex + 1}`);
                 continue;
               }
 
               if (payment.amount === undefined || payment.amount === null) {
-                errors.push(`دفعة بدون مبلغ`);
+                errors.push(`دفعة بدون مبلغ في الدفعة ${batchIndex + 1}`);
                 continue;
               }
 
@@ -530,46 +564,60 @@ const PaymentsPage = () => {
                 receiptUrl: payment.receiptUrl || "",
               };
 
-              // Add to batch promises with enhanced error handling
-              batchPromises.push(
-                paymentService
-                  .addOrUpdatePaymentWithId(cleanPayment)
-                  .then(() => {
-                    importedPayments++;
-                    console.log(`تم استيراد الدفعة: ${cleanPayment.amount} دج`);
-                  })
-                  .catch((error) => {
-                    console.error(
-                      `خطأ في استيراد الدفعة ${cleanPayment.amount}:`,
-                      error,
-                    );
-                    errors.push(
-                      `خطأ في استيراد دفعة ${cleanPayment.amount} دج: ${error.message || error}`,
-                    );
-                  }),
-              );
+              // Process payment sequentially with enhanced error handling
+              try {
+                await paymentService.addOrUpdatePaymentWithId(cleanPayment);
+                importedPayments++;
+                console.log(
+                  `تم استيراد الدفعة: ${cleanPayment.amount} دج (${importedPayments}/${payments.length})`,
+                );
+
+                // Small delay between each payment
+                await new Promise((resolve) => setTimeout(resolve, 25));
+              } catch (error) {
+                console.error(
+                  `خطأ في استيراد الدفعة ${cleanPayment.amount}:`,
+                  error,
+                );
+                errors.push(
+                  `خطأ في استيراد دفعة ${cleanPayment.amount} دج: ${error.message || error}`,
+                );
+              }
             } catch (error) {
               console.error(`خطأ في معالجة الدفعة:`, error);
               errors.push(`خطأ في معالجة الدفعة: ${error}`);
             }
           }
 
-          // Wait for current batch to complete
-          await Promise.allSettled(batchPromises);
-
-          // Small delay between batches
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          // Delay between payment batches
+          await new Promise((resolve) => setTimeout(resolve, 150));
         }
 
-        // Import activities with enhanced batch processing
+        // Import activities with enhanced sequential processing
+        const ACTIVITY_BATCH_SIZE = 10; // Activities are lightweight, can process more at once
         const activityBatches = [];
-        for (let i = 0; i < activities.length; i += BATCH_SIZE) {
-          activityBatches.push(activities.slice(i, i + BATCH_SIZE));
+        for (let i = 0; i < activities.length; i += ACTIVITY_BATCH_SIZE) {
+          activityBatches.push(activities.slice(i, i + ACTIVITY_BATCH_SIZE));
         }
 
-        for (const batch of activityBatches) {
-          const batchPromises = [];
+        console.log(
+          `معالجة ${activities.length} نشاط في ${activityBatches.length} دفعة`,
+        );
 
+        for (
+          let batchIndex = 0;
+          batchIndex < activityBatches.length;
+          batchIndex++
+        ) {
+          const batch = activityBatches[batchIndex];
+
+          // Update progress toast
+          toast({
+            title: `جاري استيراد الأنشطة...`,
+            description: `الدفعة ${batchIndex + 1} من ${activityBatches.length} (${Math.min((batchIndex + 1) * ACTIVITY_BATCH_SIZE, activities.length)} من ${activities.length})`,
+          });
+
+          // Process each activity in the batch sequentially
           for (let i = 0; i < batch.length; i++) {
             try {
               const activity = batch[i];
@@ -600,31 +648,27 @@ const PaymentsPage = () => {
                 details: activity.details || "",
               };
 
-              // Add to batch promises
-              batchPromises.push(
-                memberService
-                  .addOrUpdateActivityWithId(cleanActivity)
-                  .then(() => {
-                    importedActivities++;
-                    console.log(
-                      `تم استيراد النشاط: ${cleanActivity.activityType}`,
-                    );
-                  })
-                  .catch((error) => {
-                    console.warn(`تم تجاهل نشاط غير صحيح:`, error);
-                  }),
-              );
+              // Process activity sequentially
+              try {
+                await memberService.addOrUpdateActivityWithId(cleanActivity);
+                importedActivities++;
+                console.log(
+                  `تم استيراد النشاط: ${cleanActivity.activityType} (${importedActivities}/${activities.length})`,
+                );
+
+                // Very small delay between activities
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              } catch (error) {
+                console.warn(`تم تجاهل نشاط غير صحيح:`, error);
+              }
             } catch (error) {
               // Skip failed activities silently
               console.warn(`تم تجاهل نشاط غير صحيح:`, error);
             }
           }
 
-          // Wait for current batch to complete
-          await Promise.allSettled(batchPromises);
-
-          // Small delay between batches
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          // Small delay between activity batches
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
 
         // Success feedback

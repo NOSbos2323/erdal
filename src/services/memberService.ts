@@ -98,7 +98,7 @@ export const addMember = async (
   }
 };
 
-// Add or update member with specific ID (for imports)
+// Add or update member with specific ID (for imports) - Enhanced for batch processing
 export const addOrUpdateMemberWithId = async (
   member: Member,
 ): Promise<Member> => {
@@ -122,23 +122,64 @@ export const addOrUpdateMemberWithId = async (
       phone: member.phone || member.phoneNumber || "",
     };
 
+    // Optimize image if present to reduce memory usage
+    if (validMember.imageUrl && validMember.imageUrl.startsWith("data:")) {
+      try {
+        // Compress the image data if it's a base64 string
+        const img = new Image();
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        await new Promise((resolve, reject) => {
+          img.onload = () => {
+            // Reduce image size for storage optimization
+            const maxSize = 400; // Smaller size for batch imports
+            let { width, height } = img;
+
+            if (width > height) {
+              if (width > maxSize) {
+                height = (height * maxSize) / width;
+                width = maxSize;
+              }
+            } else {
+              if (height > maxSize) {
+                width = (width * maxSize) / height;
+                height = maxSize;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            ctx?.drawImage(img, 0, 0, width, height);
+
+            // Use lower quality for batch imports to save memory
+            validMember.imageUrl = canvas.toDataURL("image/jpeg", 0.6);
+            validMember.profileImage = validMember.imageUrl;
+            resolve(true);
+          };
+          img.onerror = () => resolve(false); // Continue even if image processing fails
+          img.src = validMember.imageUrl;
+        });
+      } catch (imageError) {
+        console.warn(
+          `تحذير: فشل في ضغط صورة العضو ${validMember.name}:`,
+          imageError,
+        );
+        // Continue with original image if compression fails
+      }
+    }
+
     // Use a transaction-like approach for better reliability
     await membersDB.setItem(member.id, validMember);
 
-    // Verify the data was written correctly
+    // Simplified verification for batch processing - only check if item exists
     const savedMember = await membersDB.getItem(member.id);
     if (!savedMember) {
       throw new Error(`فشل في حفظ العضو ${member.name}`);
     }
 
-    // Force database sync and wait for completion
-    await membersDB.ready();
-
-    // Additional verification after sync
-    const verifiedMember = await membersDB.getItem(member.id);
-    if (!verifiedMember) {
-      throw new Error(`فشل في التحقق من حفظ العضو ${member.name}`);
-    }
+    // Skip additional verification for batch processing to improve performance
+    // The database sync will happen naturally
 
     return validMember;
   } catch (error) {

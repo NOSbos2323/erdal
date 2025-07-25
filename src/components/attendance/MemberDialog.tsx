@@ -1,6 +1,6 @@
 import React from "react";
 import { Camera, Upload, Trash2 } from "lucide-react";
-import { formatNumber } from "@/lib/utils";
+import { formatNumber, compressImage } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -245,16 +245,34 @@ const MemberDialog = ({
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const imageUrl = event.target?.result as string;
-        setPreviewImage(imageUrl);
-        setFormData((prev) => ({ ...prev, imageUrl }));
-      };
-      reader.readAsDataURL(file);
+      try {
+        // Show loading state
+        setPreviewImage("");
+
+        // Validate file type
+        if (!file.type.startsWith("image/")) {
+          alert("يرجى اختيار ملف صورة صالح");
+          return;
+        }
+
+        // Validate file size (max 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          alert("حجم الصورة كبير جداً. يرجى اختيار صورة أصغر من 10 ميجابايت");
+          return;
+        }
+
+        // Compress the image
+        const compressedImageUrl = await compressImage(file, 400, 400, 0.7);
+
+        setPreviewImage(compressedImageUrl);
+        setFormData((prev) => ({ ...prev, imageUrl: compressedImageUrl }));
+      } catch (error) {
+        console.error("Error compressing image:", error);
+        alert("حدث خطأ أثناء معالجة الصورة. يرجى المحاولة مرة أخرى.");
+      }
     }
   };
 
